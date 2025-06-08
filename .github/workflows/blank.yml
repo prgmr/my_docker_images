@@ -1,0 +1,58 @@
+name: Build and Publish Docker Images
+
+on:
+  release:
+    types: [published]
+
+env:
+  REGISTRY: ghcr.io
+  TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+  TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      matrix:
+        app:
+          - dokuwiki
+          - app2
+          # Добавьте здесь имена всех папок-приложений с Dockerfile
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract release tag
+        id: get_tag
+        run: echo "RELEASE_TAG=${GITHUB_REF##*/}" >> $GITHUB_ENV
+
+      - name: Build and push Docker image
+        id: docker_build
+        uses: docker/build-push-action@v5
+        with:
+          context: ./${{ matrix.app }}
+          file: ./${{ matrix.app }}/Dockerfile
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ github.repository }}-${{ matrix.app }}:${{ env.RELEASE_TAG }}
+
+      - name: Notify Telegram
+        if: always()
+        run: |
+          STATUS="✅ Successful" && [ ${{ job.status }} != 'success' ] && STATUS="❌ Fail"
+          MESSAGE="Building Docker-image for app <b>${{ matrix.app }}</b>.\nStatus: <b>${STATUS}</b>\nRelease: <b>${{ env.RELEASE_TAG }}</b>\nRepository: <b>${{ github.repository }}</b>"
+          curl -s -X POST "https://api.telegram.org/bot${{ env.TELEGRAM_TOKEN }}/sendMessage" \
+            -d chat_id="${{ env.TELEGRAM_CHAT_ID }}" \
+            -d parse_mode="HTML" \
+            --data-urlencode text="$MESSAGE"
